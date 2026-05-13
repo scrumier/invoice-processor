@@ -15,6 +15,7 @@ If this is not an invoice, return: {"is_invoice": false}
 If it is an invoice, return:
 {
   "is_invoice": true,
+  "confidence": <integer 0-100, your confidence in the extraction quality based on image clarity and field legibility>,
   "numero_facture": "...",
   "date_facture": "YYYY-MM-DD or null",
   "fournisseur": "...",

@@ -24,7 +24,24 @@ def index():
         headers = "".join(f"<th>{f}</th>" for f in fields)
         trs = ""
         for r in reversed(rows):
-            trs += "<tr>" + "".join(f"<td>{r.get(f,'')}</td>" for f in fields) + "</tr>"
+            cells = ""
+            for f in fields:
+                val = r.get(f, "")
+                if f in ("confidence", "completeness"):
+                    try:
+                        score = int(val)
+                        if score >= 80:
+                            color = "#16a34a"
+                        elif score >= 50:
+                            color = "#d97706"
+                        else:
+                            color = "#dc2626"
+                        cells += f"<td style='color:{color};font-weight:600'>{val}%</td>"
+                    except (ValueError, TypeError):
+                        cells += f"<td>{val}</td>"
+                else:
+                    cells += f"<td>{val}</td>"
+            trs += f"<tr>{cells}</tr>"
         body = f"""
         <table>
           <thead><tr>{headers}</tr></thead>
