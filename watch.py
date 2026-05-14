@@ -11,11 +11,13 @@ from dotenv import load_dotenv
 from processor.loader import pdf_to_images
 from processor.extractor import extract_invoice
 from processor.exporter import append_to_csv
+from processor.validator import validate
 
 load_dotenv()
 
-INVOICES_DIR = os.getenv("INVOICES_DIR", "invoices")
-CSV_PATH = os.getenv("CSV_PATH", "output/invoices.csv")
+INVOICES_DIR = os.getenv("INVOICES_DIR", "data/invoices")
+PROCESSED_DIR = os.getenv("PROCESSED_DIR", "data/processed")
+CSV_PATH = os.getenv("CSV_PATH", "data/output/invoices.csv")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -32,7 +34,7 @@ def process_file(pdf_path: str) -> None:
 
     for i, image in enumerate(images):
         try:
-            data = extract_invoice(image)
+            data, cost = extract_invoice(image)
         except Exception as e:
             log.error(f"Extraction failed on page {i+1} of {filename}: {e}")
             continue
@@ -41,17 +43,28 @@ def process_file(pdf_path: str) -> None:
             log.info(f"Skipped {filename} page {i+1}: not an invoice")
             continue
 
+        flags = validate(data)
         row = {
             "filename": filename,
             "processed_at": datetime.now().isoformat(timespec="seconds"),
+            "cost_usd": f"{cost:.6f}",
             **{k: data.get(k) for k in [
                 "numero_facture", "date_facture", "fournisseur",
                 "montant_ht", "tva", "montant_ttc", "iban", "echeance"
             ]},
+            **flags,
         }
+        row["confidence"] = data.get("confidence")
+        n_flags = flags.get("flags_count", 0)
+        flag_label = f" [{n_flags} flag(s)]" if n_flags else ""
         append_to_csv(row, CSV_PATH)
-        log.info(f"Saved: {data.get('fournisseur')} - {data.get('montant_ttc')} EUR")
+        log.info(f"Saved: {data.get('fournisseur')} - {data.get('montant_ttc')} EUR (cost: ${cost:.5f}){flag_label}")
         break  # one row per PDF (first invoice page)
+
+    dest = os.path.join(PROCESSED_DIR, Path(pdf_path).name)
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
+    os.rename(pdf_path, dest)
+    log.info(f"Moved to processed/: {Path(pdf_path).name}")
 
 
 class InvoiceHandler(FileSystemEventHandler):
@@ -63,6 +76,7 @@ class InvoiceHandler(FileSystemEventHandler):
 
 if __name__ == "__main__":
     os.makedirs(INVOICES_DIR, exist_ok=True)
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
     os.makedirs(os.path.dirname(CSV_PATH), exist_ok=True)
     log.info(f"Watching {INVOICES_DIR}/")
     observer = Observer()

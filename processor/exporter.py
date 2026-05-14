@@ -2,9 +2,12 @@ import csv
 import os
 
 FIELDS = [
-    "filename", "processed_at", "confidence", "completeness",
+    "filename", "processed_at", "confidence", "completeness", "cost_usd",
+    "flags_count", "flag_lines_math", "flag_sum_ht", "flag_math_ttc",
+    "flag_tva_rate", "flag_iban_format", "flag_date_paradox",
     "numero_facture", "date_facture", "fournisseur",
     "montant_ht", "tva", "montant_ttc", "iban", "echeance",
+    "lignes_json",
 ]
 
 _EXTRACTABLE_FIELDS = [
