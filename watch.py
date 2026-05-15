@@ -39,10 +39,6 @@ def process_file(pdf_path: str) -> None:
             log.error(f"Extraction failed on page {i+1} of {filename}: {e}")
             continue
 
-        if not data.get("is_invoice"):
-            log.info(f"Skipped {filename} page {i+1}: not an invoice")
-            continue
-
         flags = validate(data)
         row = {
             "filename": filename,
