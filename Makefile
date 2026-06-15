@@ -4,7 +4,8 @@
 # Bind Tailscale uniquement, jamais exposé publiquement.
 # NB : l'ancien service systemd doit être arrêté pour libérer le port 5052.
 
-TS   := 127.0.0.1
+-include local.mk
+TS ?= 127.0.0.1
 PORT := 5052
 
 .PHONY: help setup run
