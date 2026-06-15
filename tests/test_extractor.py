@@ -15,7 +15,7 @@ def test_extract_returns_dict():
         "is_invoice": true,
         "numero_facture": "F-2024-001",
         "date_facture": "2024-01-15",
-        "fournisseur": "Rockwool France",
+        "fournisseur": "Rocmer",
         "montant_ht": "1000.00",
         "tva": "200.00",
         "montant_ttc": "1200.00",
@@ -28,7 +28,7 @@ def test_extract_returns_dict():
         result = extract_invoice(_make_image())
 
     assert result["is_invoice"] is True
-    assert result["fournisseur"] == "Rockwool France"
+    assert result["fournisseur"] == "Rocmer"
     assert result["montant_ttc"] == "1200.00"
 
 
