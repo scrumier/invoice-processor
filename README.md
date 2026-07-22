@@ -1,6 +1,6 @@
 # invoice-processor
 
-**Problem:** someone here retypes supplier invoices into a spreadsheet, one by one, every week.
+**Problem:** someone here retypes supplier invoices into a spreadsheet, one by one, every week.<br>
 **Solution:** drop the PDF in a folder and the row writes itself.
 
 Number, date, supplier, amounts, VAT, IBAN, due date.
