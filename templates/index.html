@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoice Processor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, sans-serif;
+    background: #f9fafb;
+    color: #1f2937;
+    padding: 32px;
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  h1 { font-size: 20px; font-weight: 700; }
+  .cost-badge {
+    font-size: 12px;
+    padding: 6px 14px;
+    background: #f0fdf4;
+    color: #16a34a;
+    border: 1px solid #bbf7d0;
+    border-radius: 6px;
+    font-weight: 600;
+  }
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    background: #16a34a;
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+    display: inline-block;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .3 } }
+  .reset-btn {
+    font-size: 12px;
+    padding: 6px 14px;
+    background: #fee2e2;
+    color: #dc2626;
+    border: 1px solid #fca5a5;
+    border-radius: 6px;
+    cursor: pointer;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .reset-btn:hover { background: #fca5a5; }
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 13px;
+  }
+  th {
+    background: #f3f4f6;
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: #6b7280;
+    white-space: nowrap;
+  }
+  td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #f9fafb; }
+  .hint { margin-top: 12px; font-size: 11px; color: #9ca3af; }
+  .empty { color: #6b7280; }
+  .new-row { animation: highlight 2s ease-out; }
+  @keyframes highlight {
+    from { background: #fef9c3 }
+    to { background: transparent }
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1 id="title">Invoices, {{ count }} processed</h1>
+  <span class="live-dot"></span>
+  <span class="cost-badge" id="cost-badge">
+    Total : ${{ total_cost }} (~${{ cost_per_10 }} / 10 factures)
+  </span>
+  <a href="/reset" class="reset-btn" onclick="return confirm('Reset CSV ?')">Reset CSV</a>
+</div>
+
+<div id="content">
+  {% if count %}
+  <div class="table-wrap">
+    <table id="inv-table">
+      <thead><tr>{{ headers }}</tr></thead>
+      <tbody id="inv-tbody">{{ tbody }}</tbody>
+    </table>
+  </div>
+  <p class="hint">
+    Survoler le badge flags pour le détail. Mise à jour automatique toutes les 2s.
+  </p>
+  {% else %}
+  <p class="empty">No invoices processed yet. Drop a PDF in the watched folder.</p>
+  {% endif %}
+</div>
+
+<script>
+const POLL_MS = 2000;
+const EMPTY_HTML =
+  '<p class="empty">No invoices processed yet. Drop a PDF in the watched folder.</p>';
+const HINT_HTML =
+  '<p class="hint">Survoler le badge flags pour le détail. ' +
+  'Mise à jour automatique toutes les 2s.</p>';
+
+let lastCount = {{ count }};
+
+function renderTable(data) {
+  return '<div class="table-wrap"><table id="inv-table"><thead><tr>' +
+    data.headers + '</tr></thead><tbody id="inv-tbody">' +
+    data.tbody + '</tbody></table></div>' + HINT_HTML;
+}
+
+async function poll() {
+  let data;
+  try {
+    data = await (await fetch('/api/rows')).json();
+  } catch (e) {
+    return;  // server restarting, try again on the next tick
+  }
+
+  document.getElementById('title').textContent =
+    'Invoices, ' + data.count + ' processed';
+  document.getElementById('cost-badge').textContent =
+    'Total : $' + data.total_cost + ' (~$' + data.cost_per_10 + ' / 10 factures)';
+
+  if (data.count === lastCount) return;
+
+  const content = document.getElementById('content');
+  const tbody = document.getElementById('inv-tbody');
+
+  if (data.count === 0) {
+    content.innerHTML = EMPTY_HTML;
+  } else if (!tbody) {
+    content.innerHTML = renderTable(data);
+  } else {
+    const isNew = data.count > lastCount;
+    tbody.innerHTML = data.tbody;
+    if (isNew) {
+      const first = tbody.querySelector('tr');
+      if (first) first.classList.add('new-row');
+    }
+  }
+  lastCount = data.count;
+}
+
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

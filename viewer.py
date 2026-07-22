@@ -1,191 +1,236 @@
+"""Web view of the processed-invoice CSV.
+
+Reads the CSV the watcher appends to and renders it as a table that refreshes
+on its own, so you can drop a PDF in the folder and watch the row appear.
+"""
+
 import csv
-import json
 import os
-from flask import Flask, redirect, jsonify
+
+from flask import Flask, Response, jsonify, redirect, render_template
+from markupsafe import Markup, escape
 
 app = Flask(__name__)
+
 CSV_PATH = os.getenv("CSV_PATH", "data/output/invoices.csv")
 
-_HIDDEN = {
-    "lignes_json", "flag_lines_math", "flag_sum_ht", "flag_math_ttc",
-    "flag_tva_rate", "flag_iban_format", "flag_date_paradox",
-}
+# Columns the table does not show: the raw line-item JSON is unreadable at this
+# width, and each flag reason is already surfaced in the flags badge tooltip.
+HIDDEN_FIELDS = frozenset(
+    {
+        "lignes_json",
+        "flag_lines_math",
+        "flag_sum_ht",
+        "flag_math_ttc",
+        "flag_tva_rate",
+        "flag_iban_format",
+        "flag_date_paradox",
+    }
+)
 
-FLAG_LABELS = [
+FLAG_LABELS = (
     ("flag_lines_math", "ligne math"),
     ("flag_sum_ht", "somme HT"),
     ("flag_math_ttc", "TTC"),
     ("flag_tva_rate", "TVA taux"),
     ("flag_iban_format", "IBAN"),
     ("flag_date_paradox", "date"),
-]
+)
+
+SCORE_FIELDS = ("confidence", "completeness")
+SCORE_GOOD = 80
+SCORE_FAIR = 50
+
+COLOR_GOOD = "#16a34a"
+COLOR_WARN = "#d97706"
+COLOR_BAD = "#dc2626"
+
+ROW_BG_WARN = "#fffbeb"
+ROW_BG_BAD = "#fff1f2"
+FLAGS_MANY = 2
+
+COST_SAMPLE_SIZE = 10
 
 
-def _read_csv():
+def _read_csv() -> tuple[list[str], list[dict[str, str]]]:
+    """Load the CSV the watcher writes to.
+
+    Returns:
+        The column names and every row, both empty if no invoice has been
+        processed yet.
+    """
     if not os.path.exists(CSV_PATH):
         return [], []
-    with open(CSV_PATH, encoding="utf-8") as f:
-        reader = csv.DictReader(f)
+    with open(CSV_PATH, encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
         rows = list(reader)
-        return reader.fieldnames or [], rows
+        return list(reader.fieldnames or []), rows
 
 
-def _render_cell(f, val, row):
-    if f in ("confidence", "completeness"):
+def _score_color(score: int) -> str:
+    """Pick the colour for a 0-100 confidence or completeness score.
+
+    Args:
+        score: The score to colour.
+
+    Returns:
+        A CSS colour.
+    """
+    if score >= SCORE_GOOD:
+        return COLOR_GOOD
+    if score >= SCORE_FAIR:
+        return COLOR_WARN
+    return COLOR_BAD
+
+
+def _flags_badge(row: dict[str, str]) -> Markup:
+    """Render the flags cell, with every triggered rule in its tooltip.
+
+    Args:
+        row: One CSV row.
+
+    Returns:
+        The badge markup.
+    """
+    count = int(row.get("flags_count") or 0)
+    tooltip = " | ".join(
+        f"{label}: {row[key]}" for key, label in FLAG_LABELS if row.get(key)
+    )
+    if count == 0:
+        return Markup(f"<span style='color:{COLOR_GOOD};font-weight:600'>clean</span>")
+    color = COLOR_WARN if count == 1 else COLOR_BAD
+    plural = "flag" if count == 1 else "flags"
+    return Markup(
+        f"<span style='color:{color};font-weight:600' title='{escape(tooltip)}'>"
+        f"{count} {plural}</span>"
+    )
+
+
+def _render_cell(field: str, value: str, row: dict[str, str]) -> Markup:
+    """Render one table cell.
+
+    Values come from a PDF read by a model, so they are escaped: nothing in a
+    supplier name reaches the page as markup.
+
+    Args:
+        field: Column name.
+        value: Cell value.
+        row: The row the cell belongs to, needed to build the flags tooltip.
+
+    Returns:
+        The `<td>` markup.
+    """
+    if field in SCORE_FIELDS:
         try:
-            score = int(val)
-            color = "#16a34a" if score >= 80 else ("#d97706" if score >= 50 else "#dc2626")
-            return f"<td style='color:{color};font-weight:600'>{val}%</td>"
+            score = int(value)
         except (ValueError, TypeError):
-            return f"<td>{val}</td>"
-    if f == "flags_count":
-        n = int(val) if val else 0
-        details = [f"{label}: {row[fk]}" for fk, label in FLAG_LABELS if row.get(fk)]
-        tooltip = " | ".join(details)
-        if n == 0:
-            badge = "<span style='color:#16a34a;font-weight:600'>✓ clean</span>"
-        elif n == 1:
-            badge = f"<span style='color:#d97706;font-weight:600' title='{tooltip}'>⚠ 1 flag</span>"
+            return Markup(f"<td>{escape(value)}</td>")
+        return Markup(
+            f"<td style='color:{_score_color(score)};font-weight:600'>{score}%</td>"
+        )
+    if field == "flags_count":
+        return Markup(f"<td>{_flags_badge(row)}</td>")
+    return Markup(f"<td>{escape(value)}</td>")
+
+
+def _render_rows(
+    fields: list[str],
+    rows: list[dict[str, str]],
+) -> tuple[Markup, Markup]:
+    """Render the table header and body, newest invoice first.
+
+    Args:
+        fields: Every column present in the CSV.
+        rows: Every processed invoice.
+
+    Returns:
+        The header cells and the table body.
+    """
+    visible = [field for field in fields if field not in HIDDEN_FIELDS]
+
+    body_parts = []
+    for row in reversed(rows):
+        count = int(row.get("flags_count") or 0)
+        if count >= FLAGS_MANY:
+            style = f" style='background:{ROW_BG_BAD}'"
+        elif count == 1:
+            style = f" style='background:{ROW_BG_WARN}'"
         else:
-            badge = f"<span style='color:#dc2626;font-weight:600' title='{tooltip}'>✗ {n} flags</span>"
-        return f"<td>{badge}</td>"
-    return f"<td>{val}</td>"
+            style = ""
+        cells = "".join(_render_cell(f, row.get(f, ""), row) for f in visible)
+        body_parts.append(f"<tr{style}>{cells}</tr>")
+
+    headers = "".join(f"<th>{escape(field)}</th>" for field in visible)
+    return Markup(headers), Markup("\n".join(body_parts))
 
 
-def _render_rows(fields, rows):
-    visible = [f for f in fields if f not in _HIDDEN]
-    trs = []
-    for r in reversed(rows):
-        n = int(r.get("flags_count") or 0)
-        bg = " style='background:#fff1f2'" if n >= 2 else (" style='background:#fffbeb'" if n == 1 else "")
-        cells = "".join(_render_cell(f, r.get(f, ""), r) for f in visible)
-        trs.append(f"<tr{bg}>{cells}</tr>")
-    headers = "".join(f"<th>{f}</th>" for f in visible)
-    return headers, "\n".join(trs), visible
+def _summary(rows: list[dict[str, str]]) -> dict[str, str | int]:
+    """Total what the run has cost so far.
+
+    Args:
+        rows: Every processed invoice.
+
+    Returns:
+        Invoice count, total spend, and spend per ten invoices.
+    """
+    total = sum(float(row.get("cost_usd") or 0) for row in rows)
+    per_sample = total / len(rows) * COST_SAMPLE_SIZE if rows else 0.0
+    return {
+        "count": len(rows),
+        "total_cost": f"{total:.4f}",
+        "cost_per_10": f"{per_sample:.4f}",
+    }
 
 
 @app.route("/api/rows")
-def api_rows():
+def api_rows() -> Response:
+    """Serve the current table state for the page's poller.
+
+    Returns:
+        JSON with the counters and the rendered table fragments.
+    """
     fields, rows = _read_csv()
-    total_cost = sum(float(r.get("cost_usd", 0) or 0) for r in rows)
-    cost_per_10 = total_cost / len(rows) * 10 if rows else 0
-    headers, tbody, visible = _render_rows(fields, rows) if rows else ("", "", [])
-    return jsonify({
-        "count": len(rows),
-        "total_cost": f"{total_cost:.4f}",
-        "cost_per_10": f"{cost_per_10:.4f}",
-        "headers": headers,
-        "tbody": tbody,
-    })
+    headers, tbody = _render_rows(fields, rows) if rows else (Markup(), Markup())
+    return jsonify({**_summary(rows), "headers": headers, "tbody": tbody})
 
 
 @app.route("/")
-def index():
+def index() -> str:
+    """Render the invoice table.
+
+    Returns:
+        The full page.
+    """
     fields, rows = _read_csv()
-    total_cost = sum(float(r.get("cost_usd", 0) or 0) for r in rows)
-    cost_per_10 = total_cost / len(rows) * 10 if rows else 0
-
-    if rows:
-        headers, tbody, _ = _render_rows(fields, rows)
-        body = f"""
-        <table id="inv-table">
-          <thead><tr>{headers}</tr></thead>
-          <tbody id="inv-tbody">{tbody}</tbody>
-        </table>
-        <p style='margin-top:12px;font-size:11px;color:#9ca3af'>
-          Survoler le badge flags pour le détail. Mise à jour automatique toutes les 2s.
-        </p>"""
-    else:
-        body = "<p id='empty-msg' style='color:#6b7280'>No invoices processed yet.</p>"
-
-    return f"""<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8">
-<title>Invoice Processor</title>
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: system-ui, sans-serif; background: #f9fafb; color: #1f2937; padding: 32px; }}
-  .header {{ display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }}
-  h1 {{ font-size: 20px; font-weight: 700; }}
-  .cost-badge {{ font-size: 12px; padding: 6px 14px; background: #f0fdf4; color: #16a34a;
-                border: 1px solid #bbf7d0; border-radius: 6px; font-weight: 600; }}
-  .live-dot {{ width: 8px; height: 8px; background: #16a34a; border-radius: 50%;
-               animation: pulse 1.5s infinite; display: inline-block; }}
-  @keyframes pulse {{ 0%,100% {{ opacity:1 }} 50% {{ opacity:.3 }} }}
-  .reset-btn {{ font-size: 12px; padding: 6px 14px; background: #fee2e2; color: #dc2626;
-               border: 1px solid #fca5a5; border-radius: 6px; cursor: pointer;
-               text-decoration: none; font-weight: 600; }}
-  .reset-btn:hover {{ background: #fca5a5; }}
-  table {{ width: 100%; border-collapse: collapse; background: white;
-           border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; font-size: 13px; }}
-  th {{ background: #f3f4f6; padding: 10px 12px; text-align: left;
-        border-bottom: 1px solid #e5e7eb; font-size: 11px; text-transform: uppercase;
-        letter-spacing: .5px; color: #6b7280; }}
-  td {{ padding: 10px 12px; border-bottom: 1px solid #f3f4f6; }}
-  tr:last-child td {{ border-bottom: none; }}
-  tr:hover td {{ background: #f9fafb; }}
-  .new-row {{ animation: highlight 2s ease-out; }}
-  @keyframes highlight {{ from {{ background: #fef9c3 }} to {{ background: transparent }} }}
-</style>
-</head>
-<body>
-<div class="header">
-  <h1 id="title">Invoices — {len(rows)} processed</h1>
-  <span class="live-dot"></span>
-  <span class="cost-badge" id="cost-badge">Total : ${total_cost:.4f} — ~${cost_per_10:.4f} / 10 factures</span>
-  <a href="/reset" class="reset-btn" onclick="return confirm('Reset CSV ?')">Reset CSV</a>
-</div>
-<div id="content">{body}</div>
-<script>
-let _lastCount = {len(rows)};
-
-async function poll() {{
-  try {{
-    const r = await fetch('/api/rows');
-    const d = await r.json();
-    document.getElementById('title').textContent = 'Invoices — ' + d.count + ' processed';
-    document.getElementById('cost-badge').textContent =
-      'Total : $' + d.total_cost + ' — ~$' + d.cost_per_10 + ' / 10 factures';
-
-    if (d.count !== _lastCount) {{
-      const content = document.getElementById('content');
-      if (d.count === 0) {{
-        content.innerHTML = "<p style='color:#6b7280'>No invoices processed yet.</p>";
-      }} else {{
-        const tbody = document.getElementById('inv-tbody');
-        if (!tbody) {{
-          content.innerHTML = '<table id="inv-table"><thead><tr>' + d.headers +
-            '</tr></thead><tbody id="inv-tbody">' + d.tbody + '</tbody></table>' +
-            "<p style='margin-top:12px;font-size:11px;color:#9ca3af'>Survoler le badge flags pour le détail. Mise à jour automatique toutes les 2s.</p>";
-        }} else {{
-          const added = d.count > _lastCount;
-          tbody.innerHTML = d.tbody;
-          if (added) {{
-            const first = tbody.querySelector('tr');
-            if (first) first.classList.add('new-row');
-          }}
-        }}
-      }}
-      _lastCount = d.count;
-    }}
-  }} catch(e) {{ /* serveur indisponible, on réessaie */ }}
-}}
-
-setInterval(poll, 2000);
-</script>
-</body>
-</html>"""
+    headers, tbody = _render_rows(fields, rows) if rows else (Markup(), Markup())
+    return render_template(
+        "index.html",
+        headers=headers,
+        tbody=tbody,
+        **_summary(rows),
+    )
 
 
 @app.route("/reset")
-def reset():
+def reset() -> Response:
+    """Delete the CSV so a demo can start from an empty table.
+
+    Returns:
+        A redirect back to the table.
+    """
     if os.path.exists(CSV_PATH):
         os.remove(CSV_PATH)
     return redirect("/")
 
 
+def main() -> None:
+    """Serve the viewer on the configured host and port."""
+    app.run(
+        host=os.getenv("FLASK_HOST", "127.0.0.1"),
+        port=int(os.getenv("FLASK_PORT") or 5052),
+        debug=False,
+    )
+
+
 if __name__ == "__main__":
-    host = os.getenv("FLASK_HOST", "127.0.0.1")
-    port = int(os.getenv("FLASK_PORT", 5052))
-    app.run(host=host, port=port, debug=False)
+    main()
