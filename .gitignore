@@ -1,9 +1,12 @@
 .venv/
 .env
-output/invoices.csv
-invoices/*.pdf
 __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
 local.mk
+
+# Run artefacts: the watched inbox, what it produced, and where it filed them.
+data/invoices/*.pdf
+data/output/
