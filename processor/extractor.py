@@ -21,7 +21,7 @@ from processor.models import ExtractedInvoice
 load_dotenv()
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "google/gemini-2.0-flash-001"
+DEFAULT_MODEL = "google/gemini-2.5-flash-lite"
 MAX_TOKENS = 512
 
 # OpenRouter pricing per million tokens for DEFAULT_MODEL, used to report the
