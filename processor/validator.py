@@ -1,106 +1,214 @@
+"""Business rules that decide whether an extracted invoice looks wrong.
+
+These checks never touch the model. They are plain arithmetic and format rules
+run against what was extracted, so every flag on a row can be explained to an
+accountant without appealing to what an LLM thought.
+
+Each rule returns a human-readable reason when it fires, or an empty string
+when it does not. Empty means "checked, nothing to report", which is why the
+keys are always present in the output.
+"""
+
 import json
 import re
 from datetime import datetime
 
-_VALID_TVA_RATES = [0.055, 0.10, 0.20]
-_MATH_TOLERANCE = 0.05
-_LINE_TOLERANCE = 0.02
+from processor.models import ExtractedInvoice, InvoiceLine
+
+# VAT rates in force in France. A computed rate outside this set means either a
+# misread amount or a foreign invoice, both worth a human look.
+VALID_TVA_RATES = (0.055, 0.10, 0.20)
+
+# Rounding slack. Invoice totals are rounded to the cent, and a few cents of
+# drift across a dozen lines is normal, not an error.
+MATH_TOLERANCE = 0.05
+LINE_TOLERANCE = 0.02
+RATE_TOLERANCE = 0.015
+
+IBAN_FR_PATTERN = re.compile(r"^FR\d{25}$")
+
+FLAG_KEYS = (
+    "flag_lines_math",
+    "flag_sum_ht",
+    "flag_math_ttc",
+    "flag_tva_rate",
+    "flag_iban_format",
+    "flag_date_paradox",
+)
 
 
-def _to_float(val) -> float | None:
-    if val is None:
+def _parse_date(value: str | None) -> datetime | None:
+    """Parse an ISO date, tolerating the model returning nothing usable.
+
+    Args:
+        value: Date string as extracted, expected as YYYY-MM-DD.
+
+    Returns:
+        The parsed date, or None if absent or not in the expected format.
+    """
+    if not value:
         return None
     try:
-        return float(str(val).replace(",", ".").replace(" ", ""))
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_date(val: str | None) -> datetime | None:
-    if not val:
-        return None
-    try:
-        return datetime.strptime(val, "%Y-%m-%d")
+        return datetime.strptime(value, "%Y-%m-%d")
     except ValueError:
         return None
 
 
-def validate(data: dict) -> dict:
-    """Compute validation flags from extracted invoice data. Returns dict to merge into CSV row."""
-    flags: dict = {}
+def _check_line_math(lines: list[InvoiceLine]) -> str:
+    """Check that quantity times unit price matches each line total.
 
-    lignes = data.get("lignes") or []
-    flags["lignes_json"] = json.dumps(lignes, ensure_ascii=False) if lignes else ""
+    Args:
+        lines: Line items read off the invoice table.
 
-    # Per-line math: qty × pu_ht should equal total_ht
-    line_errors = []
-    sum_from_lines = 0.0
-    for i, ligne in enumerate(lignes):
-        qty = _to_float(ligne.get("qty"))
-        pu = _to_float(ligne.get("pu_ht"))
-        total = _to_float(ligne.get("total_ht"))
-        if qty is not None and pu is not None and total is not None:
-            expected = round(qty * pu, 2)
-            if abs(expected - total) > _LINE_TOLERANCE:
-                line_errors.append(i + 1)
-            sum_from_lines += total
-
-    flags["flag_lines_math"] = ",".join(str(n) for n in line_errors) if line_errors else ""
-
-    # Sum of lines vs montant_ht
-    montant_ht = _to_float(data.get("montant_ht"))
-    if lignes and montant_ht is not None and abs(sum_from_lines - montant_ht) > _MATH_TOLERANCE:
-        flags["flag_sum_ht"] = f"{sum_from_lines:.2f} vs {montant_ht:.2f}"
-    else:
-        flags["flag_sum_ht"] = ""
-
-    # HT + TVA should equal TTC
-    tva = _to_float(data.get("tva"))
-    ttc = _to_float(data.get("montant_ttc"))
-    if montant_ht is not None and tva is not None and ttc is not None:
-        expected_ttc = round(montant_ht + tva, 2)
-        if abs(expected_ttc - ttc) > _MATH_TOLERANCE:
-            flags["flag_math_ttc"] = f"attendu {expected_ttc:.2f} affiché {ttc:.2f}"
-        else:
-            flags["flag_math_ttc"] = ""
-    else:
-        flags["flag_math_ttc"] = ""
-
-    # TVA rate consistency: computed rate should be a valid rate AND match stated rate
-    if montant_ht and montant_ht > 0 and tva is not None and tva > 0:
-        computed_rate = tva / montant_ht
-        tva_taux_stated = _to_float(data.get("tva_taux"))
-        if not any(abs(computed_rate - r) < 0.015 for r in _VALID_TVA_RATES):
-            flags["flag_tva_rate"] = f"taux calculé {computed_rate * 100:.1f}% (non standard)"
-        elif tva_taux_stated is not None and abs(computed_rate - tva_taux_stated / 100) > 0.015:
-            flags["flag_tva_rate"] = f"affiché {tva_taux_stated:.0f}% mais calculé {computed_rate * 100:.1f}%"
-        else:
-            flags["flag_tva_rate"] = ""
-    else:
-        flags["flag_tva_rate"] = ""
-
-    # IBAN format: FR + 25 digits exactly (after removing spaces)
-    iban_raw = (data.get("iban") or "").replace(" ", "")
-    if iban_raw:
-        if not re.match(r"^FR\d{25}$", iban_raw):
-            flags["flag_iban_format"] = f"invalide: {iban_raw}"
-        else:
-            flags["flag_iban_format"] = ""
-    else:
-        flags["flag_iban_format"] = ""
-
-    # Date paradox: echeance must not be before date_facture
-    d_fac = _parse_date(data.get("date_facture"))
-    d_ech = _parse_date(data.get("echeance"))
-    if d_fac and d_ech and d_ech < d_fac:
-        flags["flag_date_paradox"] = f"echeance {data['echeance']} < facture {data['date_facture']}"
-    else:
-        flags["flag_date_paradox"] = ""
-
-    flag_keys = [
-        "flag_lines_math", "flag_sum_ht", "flag_math_ttc",
-        "flag_tva_rate", "flag_iban_format", "flag_date_paradox",
+    Returns:
+        Comma-separated 1-based line numbers that do not add up, or "".
+    """
+    wrong = [
+        str(index)
+        for index, line in enumerate(lines, start=1)
+        if line.qty is not None
+        and line.pu_ht is not None
+        and line.total_ht is not None
+        and abs(round(line.qty * line.pu_ht, 2) - line.total_ht) > LINE_TOLERANCE
     ]
-    flags["flags_count"] = sum(1 for k in flag_keys if flags.get(k))
+    return ",".join(wrong)
 
+
+def _check_sum_ht(lines: list[InvoiceLine], montant_ht: float | None) -> str:
+    """Check that the line items add up to the stated pre-tax total.
+
+    Args:
+        lines: Line items read off the invoice table.
+        montant_ht: Pre-tax total as printed on the invoice.
+
+    Returns:
+        A "sum vs stated" reason when they disagree, or "".
+    """
+    if not lines or montant_ht is None:
+        return ""
+    total = sum(line.total_ht for line in lines if line.total_ht is not None)
+    if abs(total - montant_ht) > MATH_TOLERANCE:
+        return f"{total:.2f} vs {montant_ht:.2f}"
+    return ""
+
+
+def _check_ttc_math(
+    montant_ht: float | None,
+    tva: float | None,
+    ttc: float | None,
+) -> str:
+    """Check that pre-tax plus VAT equals the total charged.
+
+    Args:
+        montant_ht: Pre-tax total.
+        tva: VAT amount.
+        ttc: Total including tax.
+
+    Returns:
+        An "expected vs shown" reason when they disagree, or "".
+    """
+    if montant_ht is None or tva is None or ttc is None:
+        return ""
+    expected = round(montant_ht + tva, 2)
+    if abs(expected - ttc) > MATH_TOLERANCE:
+        return f"attendu {expected:.2f} affiché {ttc:.2f}"
+    return ""
+
+
+def _check_tva_rate(
+    montant_ht: float | None,
+    tva: float | None,
+    tva_taux: float | None,
+) -> str:
+    """Check the VAT rate implied by the amounts against the printed one.
+
+    Two different failures share this flag: a rate that matches no legal French
+    rate at all, and a rate that is legal but contradicts what the invoice
+    claims in writing.
+
+    Args:
+        montant_ht: Pre-tax total.
+        tva: VAT amount.
+        tva_taux: VAT rate as printed, in percent.
+
+    Returns:
+        A reason naming the computed rate, or "".
+    """
+    if not montant_ht or montant_ht <= 0 or tva is None or tva <= 0:
+        return ""
+    computed = tva / montant_ht
+    if not any(abs(computed - rate) < RATE_TOLERANCE for rate in VALID_TVA_RATES):
+        return f"taux calculé {computed * 100:.1f}% (non standard)"
+    if tva_taux is not None and abs(computed - tva_taux / 100) > RATE_TOLERANCE:
+        return f"affiché {tva_taux:.0f}% mais calculé {computed * 100:.1f}%"
+    return ""
+
+
+def _check_iban(iban: str | None) -> str:
+    """Check that a French IBAN has the right shape.
+
+    Args:
+        iban: IBAN as extracted, spaces allowed.
+
+    Returns:
+        A reason quoting the offending value, or "".
+    """
+    compact = (iban or "").replace(" ", "")
+    if compact and not IBAN_FR_PATTERN.match(compact):
+        return f"invalide: {compact}"
+    return ""
+
+
+def _check_date_paradox(date_facture: str | None, echeance: str | None) -> str:
+    """Check that the due date is not before the invoice date.
+
+    Args:
+        date_facture: Invoice date, YYYY-MM-DD.
+        echeance: Payment due date, YYYY-MM-DD.
+
+    Returns:
+        A reason quoting both dates, or "".
+    """
+    issued = _parse_date(date_facture)
+    due = _parse_date(echeance)
+    if issued and due and due < issued:
+        return f"echeance {echeance} < facture {date_facture}"
+    return ""
+
+
+def validate(invoice: ExtractedInvoice) -> dict[str, str | int]:
+    """Run every rule against an extracted invoice.
+
+    Args:
+        invoice: Fields validated out of the model's response.
+
+    Returns:
+        A dict of flag columns to merge into the CSV row: one entry per rule
+        (empty string when the rule did not fire), the line items serialised
+        as JSON, and `flags_count`.
+    """
+    flags: dict[str, str | int] = {
+        "flag_lines_math": _check_line_math(invoice.lignes),
+        "flag_sum_ht": _check_sum_ht(invoice.lignes, invoice.montant_ht),
+        "flag_math_ttc": _check_ttc_math(
+            invoice.montant_ht, invoice.tva, invoice.montant_ttc
+        ),
+        "flag_tva_rate": _check_tva_rate(
+            invoice.montant_ht, invoice.tva, invoice.tva_taux
+        ),
+        "flag_iban_format": _check_iban(invoice.iban),
+        "flag_date_paradox": _check_date_paradox(
+            invoice.date_facture, invoice.echeance
+        ),
+    }
+
+    flags["lignes_json"] = (
+        json.dumps(
+            [line.model_dump() for line in invoice.lignes],
+            ensure_ascii=False,
+        )
+        if invoice.lignes
+        else ""
+    )
+    flags["flags_count"] = sum(1 for key in FLAG_KEYS if flags[key])
     return flags
