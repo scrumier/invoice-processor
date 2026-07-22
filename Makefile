@@ -1,29 +1,44 @@
-# invoice-processor — launcher autonome.
-#   make setup   <- une fois : venv + deps (uv)
-#   make run     <- démarre le viewer  ->  http://127.0.0.1:5052
-# Bind Tailscale uniquement, jamais exposé publiquement.
-# NB : l'ancien service systemd doit être arrêté pour libérer le port 5052.
+# invoice-processor
+#   make setup   install dependencies (once)
+#   make watch   watch the invoice folder and process what lands in it
+#   make run     serve the results table
+#   make demo    generate fake invoices to try it with
+#   make test    run the test suite
+#   make lint    lint and format check
 
 -include local.mk
-TS ?= 127.0.0.1
-PORT := 5052
+HOST ?= 127.0.0.1
+PORT ?= 5052
 
-.PHONY: help setup run
+.PHONY: help setup watch run demo test lint
 
 help:
 	@echo ""
-	@echo "  invoice-processor   ->  http://$(TS):$(PORT)"
-	@echo "    make setup   installe les deps (une fois)"
-	@echo "    make run     démarre le viewer"
+	@echo "  make setup   install dependencies (needs poppler-utils on the system)"
+	@echo "  make watch   watch the invoice folder"
+	@echo "  make run     results table  ->  http://$(HOST):$(PORT)"
+	@echo "  make demo    generate fake invoices to try it with"
+	@echo "  make test    run the test suite"
+	@echo "  make lint    lint and format check"
 	@echo ""
 
 setup:
-	@echo "==> uv sync..."
 	@uv sync --quiet
-	@echo "==> Prêt. Lancer :  make run"
+	@echo "==> Ready. Copy .env.example to .env and add your OPENROUTER_API_KEY."
+
+watch:
+	@uv run python watch.py
 
 run:
-	@echo ""
-	@echo "==> Ouvre sur ton Mac :  http://$(TS):$(PORT)      (Ctrl+C pour arrêter)"
-	@echo ""
-	@FLASK_HOST=$(TS) FLASK_PORT=$(PORT) uv run python viewer.py
+	@echo "==> http://$(HOST):$(PORT)   (Ctrl+C to stop)"
+	@FLASK_HOST=$(HOST) FLASK_PORT=$(PORT) uv run python viewer.py
+
+demo:
+	@uv run python generate_sample_invoices.py
+
+test:
+	@uv run pytest -q
+
+lint:
+	@uv run ruff check .
+	@uv run ruff format --check .
