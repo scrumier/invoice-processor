@@ -1,24 +1,26 @@
-"""
-Generate fake but realistic French invoices as scanned-looking PDFs.
-Outputs to unprocessed/ folder.
+"""Generate fake but realistic French invoices as scanned-looking PDFs.
+
+Outputs to the unprocessed/ folder.
 
 Usage:
   uv run python generate_sample_invoices.py          # generates 10
   uv run python generate_sample_invoices.py 100      # generates 100
 """
+
 import os
 import random
-import sys
-import numpy as np
 from datetime import date, timedelta
-from PIL import Image, ImageFilter, ImageEnhance
+
+import numpy as np
 from fpdf import FPDF
+from pdf2image import convert_from_bytes
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 QUALITY_DIRS = {
-    "good":  os.path.join(DATA_DIR, "unprocessed", "clean"),
-    "bad":   os.path.join(DATA_DIR, "unprocessed", "medium"),
-    "ugly":  os.path.join(DATA_DIR, "unprocessed", "ugly"),
+    "good": os.path.join(DATA_DIR, "unprocessed", "clean"),
+    "bad": os.path.join(DATA_DIR, "unprocessed", "medium"),
+    "ugly": os.path.join(DATA_DIR, "unprocessed", "ugly"),
 }
 for _d in QUALITY_DIRS.values():
     os.makedirs(_d, exist_ok=True)
@@ -31,18 +33,38 @@ FONT_BOLD = "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
 
 FOURNISSEURS = [
     ("PLOMBERIE MARTIN & FILS", "14 rue des Artisans, 69003 Lyon", "04 72 11 22 33"),
-    ("ELECTRICITE DUPONT SARL", "8 allée des Métiers, 31000 Toulouse", "05 61 44 55 66"),
+    (
+        "ELECTRICITE DUPONT SARL",
+        "8 allée des Métiers, 31000 Toulouse",
+        "05 61 44 55 66",
+    ),
     ("MENUISERIE LEBLANC", "Zone Industrielle Nord, 59000 Lille", "03 20 12 34 56"),
     ("DATAFLOW SAS", "2 avenue de l'Innovation, 75008 Paris", "01 44 55 66 77"),
-    ("MATERIAUX DU SUD SARL", "Zone Artisanale des Pins, 13300 Salon-de-Provence", "04 90 55 44 33"),
-    ("TRANSPORT GIRARD & CIE", "Route Nationale 7, 42000 Saint-Etienne", "04 77 33 22 11"),
+    (
+        "MATERIAUX DU SUD SARL",
+        "Zone Artisanale des Pins, 13300 Salon-de-Provence",
+        "04 90 55 44 33",
+    ),
+    (
+        "TRANSPORT GIRARD & CIE",
+        "Route Nationale 7, 42000 Saint-Etienne",
+        "04 77 33 22 11",
+    ),
     ("AGENCE MEDIA CONCEPT", "17 rue de la Presse, 33000 Bordeaux", "05 56 78 90 12"),
-    ("NETTOYAGE PRO SERVICES", "12 rue des Lilas, 69100 Villeurbanne", "04 78 66 55 44"),
+    (
+        "NETTOYAGE PRO SERVICES",
+        "12 rue des Lilas, 69100 Villeurbanne",
+        "04 78 66 55 44",
+    ),
     ("SECURITE PLUS SA", "45 boulevard de la Sécurité, 06000 Nice", "04 93 22 33 44"),
     ("LOGISTIQUE EXPRESS", "Port de Commerce, 76600 Le Havre", "02 35 44 55 66"),
     ("IMPRIMERIE CENTRALE", "6 rue Gutenberg, 67000 Strasbourg", "03 88 77 66 55"),
     ("FOURNITURES BUREAU DELTA", "22 avenue Kléber, 75116 Paris", "01 47 23 45 67"),
-    ("MAINTENANCE INDUSTRIELLE ROUX", "Parc Technologique, 38000 Grenoble", "04 76 88 99 00"),
+    (
+        "MAINTENANCE INDUSTRIELLE ROUX",
+        "Parc Technologique, 38000 Grenoble",
+        "04 76 88 99 00",
+    ),
     ("CATERING & CO", "15 rue de la Gastronomie, 69001 Lyon", "04 72 33 44 55"),
     ("IT SOLUTIONS PRO", "Tour Défense, 92800 Puteaux", "01 49 88 77 66"),
 ]
@@ -72,27 +94,72 @@ IBANS = [
 BICS = ["BNPAFRPPXXX", "AGRIFRPP882", "CMCIFRPP", "CEPAFRPP751", "SOGEFRPP"]
 
 PRODUITS_SERVICES = [
-    [("Fourniture et pose robinetterie", 1, 180), ("Joint et pièces diverses", 1, 35), ("Main d'oeuvre (3h)", 3, 65)],
-    [("Câblage tableau électrique", 1, 450), ("Disjoncteurs et matériel", 1, 120), ("Main d'oeuvre (4h)", 4, 75)],
-    [("Pose fenêtres double vitrage (x3)", 3, 380), ("Joints d'étanchéité", 1, 45), ("Main d'oeuvre", 1, 240)],
-    [("Abonnement logiciel Pro (12 mois)", 1, 990), ("Support technique prioritaire", 1, 200)],
-    [("Livraison matériaux chantier", 1, 85), ("Ciment sac 25kg (x20)", 20, 8.20), ("Parpaings palette", 2, 89)],
-    [("Transport marchandises 500km", 1, 320), ("Frais de péage", 1, 45), ("Assurance transport", 1, 35)],
-    [("Création site internet", 1, 1200), ("Référencement SEO (6 mois)", 1, 480), ("Hébergement annuel", 1, 120)],
+    [
+        ("Fourniture et pose robinetterie", 1, 180),
+        ("Joint et pièces diverses", 1, 35),
+        ("Main d'oeuvre (3h)", 3, 65),
+    ],
+    [
+        ("Câblage tableau électrique", 1, 450),
+        ("Disjoncteurs et matériel", 1, 120),
+        ("Main d'oeuvre (4h)", 4, 75),
+    ],
+    [
+        ("Pose fenêtres double vitrage (x3)", 3, 380),
+        ("Joints d'étanchéité", 1, 45),
+        ("Main d'oeuvre", 1, 240),
+    ],
+    [
+        ("Abonnement logiciel Pro (12 mois)", 1, 990),
+        ("Support technique prioritaire", 1, 200),
+    ],
+    [
+        ("Livraison matériaux chantier", 1, 85),
+        ("Ciment sac 25kg (x20)", 20, 8.20),
+        ("Parpaings palette", 2, 89),
+    ],
+    [
+        ("Transport marchandises 500km", 1, 320),
+        ("Frais de péage", 1, 45),
+        ("Assurance transport", 1, 35),
+    ],
+    [
+        ("Création site internet", 1, 1200),
+        ("Référencement SEO (6 mois)", 1, 480),
+        ("Hébergement annuel", 1, 120),
+    ],
     [("Nettoyage locaux (mensuel)", 1, 480), ("Produits d'entretien", 1, 65)],
-    [("Surveillance alarme (trimestre)", 1, 290), ("Maintenance système", 1, 150), ("Badge accès (x5)", 5, 25)],
+    [
+        ("Surveillance alarme (trimestre)", 1, 290),
+        ("Maintenance système", 1, 150),
+        ("Badge accès (x5)", 5, 25),
+    ],
     [("Location entrepôt 200m2 (mois)", 1, 1800), ("Charges et taxes", 1, 320)],
-    [("Impression brochures A4 (1000ex)", 1, 340), ("Plastification couverture", 1, 80)],
-    [("Fournitures bureau (commande)", 1, 245), ("Cartouches imprimante (x4)", 4, 28), ("Ramettes papier (x10)", 10, 5.50)],
-    [("Révision machine CNC", 1, 580), ("Pièces de rechange", 1, 195), ("Main d'oeuvre technicien", 4, 95)],
-    [("Buffet réunion (30 pers)", 1, 450), ("Location matériel (verres, etc.)", 1, 120)],
+    [
+        ("Impression brochures A4 (1000ex)", 1, 340),
+        ("Plastification couverture", 1, 80),
+    ],
+    [
+        ("Fournitures bureau (commande)", 1, 245),
+        ("Cartouches imprimante (x4)", 4, 28),
+        ("Ramettes papier (x10)", 10, 5.50),
+    ],
+    [
+        ("Révision machine CNC", 1, 580),
+        ("Pièces de rechange", 1, 195),
+        ("Main d'oeuvre technicien", 4, 95),
+    ],
+    [
+        ("Buffet réunion (30 pers)", 1, 450),
+        ("Location matériel (verres, etc.)", 1, 120),
+    ],
     [("Audit sécurité informatique", 1, 1500), ("Rapport et recommandations", 1, 350)],
 ]
 
 TVA_RATES = [0.20, 0.10, 0.055]
 
 
-def _random_date(year=2024) -> tuple[str, str]:
+def _random_date(year: int = 2024) -> tuple[str, str]:
     start = date(year, 1, 1)
     d = start + timedelta(days=random.randint(0, 364))
     echeance = d + timedelta(days=random.choice([30, 45, 60]))
@@ -105,13 +172,11 @@ def _invoice_number(i: int) -> str:
 
 
 def _siret() -> str:
-    return f"{random.randint(100,999)} {random.randint(100,999)} {random.randint(100,999)} {random.randint(10000,99999)}"
+    return f"{random.randint(100, 999)} {random.randint(100, 999)} {random.randint(100, 999)} {random.randint(10000, 99999)}"
 
 
 def _scan_effect(img: Image.Image, quality: str = "mixed") -> Image.Image:
-    """
-    quality: "good" | "bad" | "ugly" | "mixed" (random pick)
-    """
+    """quality: "good" | "bad" | "ugly" | "mixed" (random pick)."""
     if quality == "mixed":
         quality = random.choices(["good", "bad", "ugly"], weights=[0.3, 0.4, 0.3])[0]
 
@@ -137,7 +202,11 @@ def _scan_effect(img: Image.Image, quality: str = "mixed") -> Image.Image:
         brightness = random.uniform(0.70, 1.30)
 
     # Rotation
-    fill_color = (random.randint(235, 255), random.randint(232, 252), random.randint(225, 248))
+    fill_color = (
+        random.randint(235, 255),
+        random.randint(232, 252),
+        random.randint(225, 248),
+    )
     img = img.rotate(angle, fillcolor=fill_color, expand=False)
 
     # Noise
@@ -156,7 +225,11 @@ def _scan_effect(img: Image.Image, quality: str = "mixed") -> Image.Image:
     # Vignette (dark edges) — surtout sur bad/ugly
     if quality in ("bad", "ugly") and random.random() < 0.6:
         arr = np.array(img).astype(np.float32)
-        strength = random.uniform(0.25, 0.55) if quality == "ugly" else random.uniform(0.1, 0.3)
+        strength = (
+            random.uniform(0.25, 0.55)
+            if quality == "ugly"
+            else random.uniform(0.1, 0.3)
+        )
         xs = np.linspace(-1, 1, w)
         ys = np.linspace(-1, 1, h)
         xv, yv = np.meshgrid(xs, ys)
@@ -167,34 +240,40 @@ def _scan_effect(img: Image.Image, quality: str = "mixed") -> Image.Image:
 
     # Tache aléatoire (café / doigt) — ugly seulement
     if quality == "ugly" and random.random() < 0.4:
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(img)
+        ImageDraw.Draw(img)
         cx = random.randint(w // 4, 3 * w // 4)
         cy = random.randint(h // 4, 3 * h // 4)
         rx, ry = random.randint(15, 40), random.randint(10, 25)
         alpha = random.randint(60, 130)
-        color = (random.randint(150, 200), random.randint(120, 170), random.randint(80, 130), alpha)
+        color = (
+            random.randint(150, 200),
+            random.randint(120, 170),
+            random.randint(80, 130),
+            alpha,
+        )
         overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        ImageDraw.Draw(overlay).ellipse([cx-rx, cy-ry, cx+rx, cy+ry], fill=color)
+        ImageDraw.Draw(overlay).ellipse(
+            [cx - rx, cy - ry, cx + rx, cy + ry], fill=color
+        )
         img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
 
     return img
 
 
-def _pdf_to_scanned_pdf(pdf_bytes: bytes, filename: str):
-    from pdf2image import convert_from_bytes
+def _pdf_to_scanned_pdf(pdf_bytes: bytes, filename: str) -> None:
     pages = convert_from_bytes(pdf_bytes, dpi=150)
     scanned = [_scan_effect(p.convert("RGB")) for p in pages]
     out_path = os.path.join(OUTPUT_DIR, filename)
     scanned[0].save(out_path, "PDF", save_all=True, append_images=scanned[1:])
 
 
-def _setup_fonts(pdf: FPDF):
+def _setup_fonts(pdf: FPDF) -> None:
     pdf.add_font("Sans", "", FONT_REGULAR)
     pdf.add_font("Sans", "B", FONT_BOLD)
 
 
 # ── Layout variants ────────────────────────────────────────────────────────────
+
 
 def _layout_classic(i: int) -> bytes:
     """Classic French invoice: header top-left, table, totals."""
@@ -217,7 +296,9 @@ def _layout_classic(i: int) -> bytes:
     pdf.cell(0, 8, fourn_name, new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "", 9)
     pdf.cell(0, 5, fourn_addr, new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 5, f"Tél : {fourn_tel}   SIRET : {_siret()}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 5, f"Tél : {fourn_tel}   SIRET : {_siret()}", new_x="LMARGIN", new_y="NEXT"
+    )
     pdf.ln(4)
     pdf.set_draw_color(180, 180, 180)
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
@@ -226,7 +307,13 @@ def _layout_classic(i: int) -> bytes:
     pdf.set_font("Sans", "B", 12)
     pdf.cell(0, 7, f"FACTURE N° {inv_num}", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "", 9)
-    pdf.cell(0, 5, f"Date : {date_str}     Echéance : {echeance_str}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        5,
+        f"Date : {date_str}     Echéance : {echeance_str}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
     pdf.ln(4)
 
     pdf.set_font("Sans", "B", 9)
@@ -260,8 +347,10 @@ def _layout_classic(i: int) -> bytes:
 
     pdf.ln(3)
     pdf.set_font("Sans", "", 9)
-    for label, val in [("Total HT :", f"{total_ht:.2f} EUR"),
-                       (f"TVA {int(tva_rate*100)}% :", f"{tva_amt:.2f} EUR")]:
+    for label, val in [
+        ("Total HT :", f"{total_ht:.2f} EUR"),
+        (f"TVA {int(tva_rate * 100)}% :", f"{tva_amt:.2f} EUR"),
+    ]:
         pdf.cell(145, 5, label, align="R")
         pdf.cell(25, 5, val, align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "B", 9)
@@ -283,7 +372,7 @@ def _layout_modern(i: int) -> bytes:
     pdf.set_margins(20, 20, 20)
     pdf.set_auto_page_break(False)
 
-    fourn_name, fourn_addr, fourn_tel = random.choice(FOURNISSEURS)
+    fourn_name, fourn_addr, _fourn_tel = random.choice(FOURNISSEURS)
     client_name, client_addr = random.choice(CLIENTS)
     inv_num = _invoice_number(i)
     date_str, echeance_str = _random_date()
@@ -346,8 +435,10 @@ def _layout_modern(i: int) -> bytes:
 
     pdf.ln(3)
     pdf.set_font("Sans", "", 9)
-    for label, val in [("Sous-total HT", f"{total_ht:.2f} EUR"),
-                       (f"TVA {int(tva_rate*100)}%", f"{tva_amt:.2f} EUR")]:
+    for label, val in [
+        ("Sous-total HT", f"{total_ht:.2f} EUR"),
+        (f"TVA {int(tva_rate * 100)}%", f"{tva_amt:.2f} EUR"),
+    ]:
         pdf.cell(145, 5, label, align="R")
         pdf.cell(25, 5, val, align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "B", 10)
@@ -389,7 +480,9 @@ def _layout_two_col(i: int) -> bytes:
     pdf.cell(95, 4, f"SIRET : {_siret()}")
     pdf.cell(0, 4, f"Date : {date_str}", align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(95, 4, f"Tél : {fourn_tel}")
-    pdf.cell(0, 4, f"Echéance : {echeance_str}", align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 4, f"Echéance : {echeance_str}", align="R", new_x="LMARGIN", new_y="NEXT"
+    )
     pdf.ln(3)
     pdf.set_draw_color(160, 160, 160)
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
@@ -405,7 +498,7 @@ def _layout_two_col(i: int) -> bytes:
     headers = ["Réf.", "Désignation", "Qté", "Prix U. HT", "Total HT", "TVA"]
     pdf.set_fill_color(215, 215, 215)
     pdf.set_font("Sans", "B", 8)
-    for w, h in zip(widths, headers):
+    for w, h in zip(widths, headers, strict=False):
         pdf.cell(w, 6, h, border=1, fill=True, align="C")
     pdf.ln()
 
@@ -414,8 +507,19 @@ def _layout_two_col(i: int) -> bytes:
     for j, (desc, qty, pu) in enumerate(produits):
         t = round(qty * pu, 2)
         total_ht += t
-        ref = f"ART-{j+1:03d}"
-        for w, val in zip(widths, [ref, desc, str(qty), f"{pu:.2f} EUR", f"{t:.2f} EUR", f"{int(tva_rate*100)}%"]):
+        ref = f"ART-{j + 1:03d}"
+        for w, val in zip(
+            widths,
+            [
+                ref,
+                desc,
+                str(qty),
+                f"{pu:.2f} EUR",
+                f"{t:.2f} EUR",
+                f"{int(tva_rate * 100)}%",
+            ],
+            strict=False,
+        ):
             pdf.cell(w, 5, val, border=1, align="C" if w <= 15 else "L")
         pdf.ln()
 
@@ -424,17 +528,27 @@ def _layout_two_col(i: int) -> bytes:
 
     pdf.ln(3)
     pdf.set_font("Sans", "", 8)
-    for label, val in [(f"Base HT {int(tva_rate*100)}%", f"{total_ht:.2f} EUR"),
-                       (f"TVA {int(tva_rate*100)}%", f"{tva_amt:.2f} EUR"),
-                       ("Total HT", f"{total_ht:.2f} EUR"),
-                       ("TOTAL TTC", f"{ttc:.2f} EUR")]:
+    for label, val in [
+        (f"Base HT {int(tva_rate * 100)}%", f"{total_ht:.2f} EUR"),
+        (f"TVA {int(tva_rate * 100)}%", f"{tva_amt:.2f} EUR"),
+        ("Total HT", f"{total_ht:.2f} EUR"),
+        ("TOTAL TTC", f"{ttc:.2f} EUR"),
+    ]:
         pdf.cell(150, 4, label, align="R")
         pdf.cell(20, 4, val, align="R", new_x="LMARGIN", new_y="NEXT")
 
     pdf.ln(5)
     pdf.set_font("Sans", "", 7)
-    pdf.cell(0, 4, f"Virement : IBAN {iban}   BIC : {bic}", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 4, "Pénalités de retard : 3x taux légal. Indemnité forfaitaire : 40 EUR.", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 4, f"Virement : IBAN {iban}   BIC : {bic}", new_x="LMARGIN", new_y="NEXT"
+    )
+    pdf.cell(
+        0,
+        4,
+        "Pénalités de retard : 3x taux légal. Indemnité forfaitaire : 40 EUR.",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
 
     return pdf.output()
 
@@ -465,11 +579,19 @@ def _layout_minimal(i: int) -> bytes:
     pdf.set_font("Sans", "B", 9)
     pdf.cell(0, 5, f"Facture n° {inv_num}", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "", 8)
-    pdf.cell(0, 4, f"Emise le {date_str} — Echéance {echeance_str}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        4,
+        f"Emise le {date_str} — Echéance {echeance_str}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
     pdf.ln(5)
 
     pdf.set_font("Sans", "", 8)
-    pdf.cell(0, 4, f"Client : {client_name}, {client_addr}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 4, f"Client : {client_name}, {client_addr}", new_x="LMARGIN", new_y="NEXT"
+    )
     pdf.ln(6)
 
     total_ht = 0
@@ -497,9 +619,9 @@ def _layout_minimal(i: int) -> bytes:
     tva_amt = round(total_ht * tva_rate, 2)
     ttc = round(total_ht + tva_amt, 2)
     pdf.set_font("Sans", "", 8)
-    pdf.cell(130, 4, f"Total HT", align="R")
+    pdf.cell(130, 4, "Total HT", align="R")
     pdf.cell(30, 4, f"{total_ht:.2f} EUR", align="R", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(130, 4, f"TVA {int(tva_rate*100)}%", align="R")
+    pdf.cell(130, 4, f"TVA {int(tva_rate * 100)}%", align="R")
     pdf.cell(30, 4, f"{tva_amt:.2f} EUR", align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "B", 9)
     pdf.cell(130, 5, "Net à payer", align="R")
@@ -542,7 +664,7 @@ def _layout_sidebar(i: int) -> bytes:
     pdf.cell(45, 4, fourn_tel, new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
     pdf.set_x(5)
-    pdf.cell(45, 4, f"SIRET:", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(45, 4, "SIRET:", new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(5)
     pdf.cell(45, 4, _siret(), new_x="LMARGIN", new_y="NEXT")
     pdf.ln(8)
@@ -560,7 +682,13 @@ def _layout_sidebar(i: int) -> bytes:
     pdf.cell(0, 8, "FACTURE", new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(62)
     pdf.set_font("Sans", "", 8)
-    pdf.cell(0, 4, f"N° {inv_num}  |  {date_str}  |  Echéance : {echeance_str}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        4,
+        f"N° {inv_num}  |  {date_str}  |  Echéance : {echeance_str}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
     pdf.ln(5)
     pdf.set_x(62)
     pdf.set_font("Sans", "B", 8)
@@ -578,7 +706,7 @@ def _layout_sidebar(i: int) -> bytes:
     pdf.set_fill_color(r, g, b)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Sans", "B", 8)
-    for w, h in zip(col_w, ["Désignation", "Qté", "P.U. HT", "Total HT"]):
+    for w, h in zip(col_w, ["Désignation", "Qté", "P.U. HT", "Total HT"], strict=False):
         pdf.cell(w, 6, h, fill=True, align="C" if w < 40 else "L")
     pdf.ln()
     pdf.set_text_color(0, 0, 0)
@@ -597,7 +725,10 @@ def _layout_sidebar(i: int) -> bytes:
     ttc = round(total_ht + tva_amt, 2)
     pdf.ln(3)
     pdf.set_font("Sans", "", 8)
-    for label, val in [(f"Total HT", f"{total_ht:.2f} EUR"), (f"TVA {int(tva_rate*100)}%", f"{tva_amt:.2f} EUR")]:
+    for label, val in [
+        ("Total HT", f"{total_ht:.2f} EUR"),
+        (f"TVA {int(tva_rate * 100)}%", f"{tva_amt:.2f} EUR"),
+    ]:
         pdf.set_x(62)
         pdf.cell(120, 4, label, align="R")
         pdf.cell(25, 4, val, align="R", new_x="LMARGIN", new_y="NEXT")
@@ -629,7 +760,14 @@ def _layout_centered(i: int) -> bytes:
     pdf.cell(0, 9, fourn_name, align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "", 8)
     pdf.cell(0, 4, fourn_addr, align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 4, f"Tél : {fourn_tel}   SIRET : {_siret()}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        4,
+        f"Tél : {fourn_tel}   SIRET : {_siret()}",
+        align="C",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
     pdf.ln(3)
     pdf.set_draw_color(100, 100, 100)
     pdf.set_line_width(0.8)
@@ -640,7 +778,14 @@ def _layout_centered(i: int) -> bytes:
     pdf.set_font("Sans", "B", 12)
     pdf.cell(0, 7, f"FACTURE N° {inv_num}", align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "", 8)
-    pdf.cell(0, 4, f"Date : {date_str}   —   Echéance : {echeance_str}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        4,
+        f"Date : {date_str}   —   Echéance : {echeance_str}",
+        align="C",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
     pdf.ln(6)
 
     # Client bloc à droite
@@ -676,13 +821,25 @@ def _layout_centered(i: int) -> bytes:
     ttc = round(total_ht + tva_amt, 2)
     pdf.ln(3)
     pdf.set_font("Sans", "", 8)
-    for label, val in [("Total HT", f"{total_ht:.2f} EUR"), (f"TVA {int(tva_rate*100)}%", f"{tva_amt:.2f} EUR")]:
+    for label, val in [
+        ("Total HT", f"{total_ht:.2f} EUR"),
+        (f"TVA {int(tva_rate * 100)}%", f"{tva_amt:.2f} EUR"),
+    ]:
         pdf.cell(0, 4, f"{label} : {val}", align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "B", 9)
-    pdf.cell(0, 5, f"TOTAL TTC : {ttc:.2f} EUR", align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 5, f"TOTAL TTC : {ttc:.2f} EUR", align="R", new_x="LMARGIN", new_y="NEXT"
+    )
     pdf.ln(6)
     pdf.set_font("Sans", "", 7)
-    pdf.cell(0, 4, f"Règlement par virement — IBAN : {iban}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        4,
+        f"Règlement par virement — IBAN : {iban}",
+        align="C",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
 
     return pdf.output()
 
@@ -717,7 +874,9 @@ def _layout_oldschool(i: int) -> bytes:
     pdf.set_x(18)
     pdf.cell(0, 4, fourn_addr, new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(18)
-    pdf.cell(0, 4, f"Tél : {fourn_tel}  —  SIRET : {_siret()}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 4, f"Tél : {fourn_tel}  —  SIRET : {_siret()}", new_x="LMARGIN", new_y="NEXT"
+    )
     pdf.ln(3)
 
     pdf.set_line_width(0.6)
@@ -737,14 +896,20 @@ def _layout_oldschool(i: int) -> bytes:
 
     pdf.set_x(18)
     pdf.set_font("Sans", "B", 8)
-    pdf.cell(0, 5, f"CLIENT : {client_name}  /  {client_addr}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 5, f"CLIENT : {client_name}  /  {client_addr}", new_x="LMARGIN", new_y="NEXT"
+    )
     pdf.line(18, pdf.get_y(), 192, pdf.get_y())
     pdf.ln(4)
 
     total_ht = 0
     pdf.set_x(18)
     pdf.set_font("Sans", "B", 8)
-    for w, h in zip([85, 20, 30, 30, 9], ["DESIGNATION", "QTE", "PU HT", "MONTANT HT", "TVA"]):
+    for w, h in zip(
+        [85, 20, 30, 30, 9],
+        ["DESIGNATION", "QTE", "PU HT", "MONTANT HT", "TVA"],
+        strict=False,
+    ):
         pdf.cell(w, 6, h, border=1, align="C")
     pdf.ln()
     pdf.set_font("Sans", "", 8)
@@ -752,7 +917,11 @@ def _layout_oldschool(i: int) -> bytes:
         t = round(qty * pu, 2)
         total_ht += t
         pdf.set_x(18)
-        for w, v in zip([85, 20, 30, 30, 9], [desc, str(qty), f"{pu:.2f}", f"{t:.2f}", f"{int(tva_rate*100)}%"]):
+        for w, v in zip(
+            [85, 20, 30, 30, 9],
+            [desc, str(qty), f"{pu:.2f}", f"{t:.2f}", f"{int(tva_rate * 100)}%"],
+            strict=False,
+        ):
             pdf.cell(w, 5, v, border=1, align="C" if w <= 30 else "L")
         pdf.ln()
 
@@ -761,7 +930,10 @@ def _layout_oldschool(i: int) -> bytes:
     pdf.ln(3)
     pdf.set_x(18)
     pdf.set_font("Sans", "", 8)
-    for label, val in [("TOTAL HT", f"{total_ht:.2f}"), (f"T.V.A. {int(tva_rate*100)}%", f"{tva_amt:.2f}")]:
+    for label, val in [
+        ("TOTAL HT", f"{total_ht:.2f}"),
+        (f"T.V.A. {int(tva_rate * 100)}%", f"{tva_amt:.2f}"),
+    ]:
         pdf.cell(155, 4, label, align="R")
         pdf.cell(19, 4, val, align="R", new_x="LMARGIN", new_y="NEXT")
         pdf.set_x(18)
@@ -773,7 +945,13 @@ def _layout_oldschool(i: int) -> bytes:
     pdf.set_font("Sans", "", 7)
     pdf.cell(0, 4, f"Virement bancaire — IBAN : {iban}", new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(18)
-    pdf.cell(0, 4, "Tout retard de paiement entraine des penalites de 3x le taux legal.", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        4,
+        "Tout retard de paiement entraine des penalites de 3x le taux legal.",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
 
     return pdf.output()
 
@@ -805,7 +983,9 @@ def _layout_condensed(i: int) -> bytes:
     pdf.cell(81, 5, "EMETTEUR", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "", 7)
     pdf.set_x(17)
-    pdf.multi_cell(81, 3.5, f"{fourn_name}\n{fourn_addr}\nTel: {fourn_tel}\nSIRET: {_siret()}")
+    pdf.multi_cell(
+        81, 3.5, f"{fourn_name}\n{fourn_addr}\nTel: {fourn_tel}\nSIRET: {_siret()}"
+    )
 
     pdf.set_xy(112, 17)
     pdf.set_font("Sans", "B", 9)
@@ -829,7 +1009,7 @@ def _layout_condensed(i: int) -> bytes:
     col_h = ["#", "Désignation", "Qté", "P.U. HT", "Total HT", "Total TTC", "TVA"]
     pdf.set_fill_color(80, 80, 80)
     pdf.set_text_color(255, 255, 255)
-    for w, h in zip(col_w, col_h):
+    for w, h in zip(col_w, col_h, strict=False):
         pdf.cell(w, 5, h, fill=True, align="C")
     pdf.ln()
     pdf.set_text_color(0, 0, 0)
@@ -838,8 +1018,16 @@ def _layout_condensed(i: int) -> bytes:
         t_ht = round(qty * pu, 2)
         t_ttc = round(t_ht * (1 + tva_rate), 2)
         total_ht += t_ht
-        vals = [str(j+1), desc, str(qty), f"{pu:.2f}", f"{t_ht:.2f}", f"{t_ttc:.2f}", f"{int(tva_rate*100)}%"]
-        for w, v in zip(col_w, vals):
+        vals = [
+            str(j + 1),
+            desc,
+            str(qty),
+            f"{pu:.2f}",
+            f"{t_ht:.2f}",
+            f"{t_ttc:.2f}",
+            f"{int(tva_rate * 100)}%",
+        ]
+        for w, v in zip(col_w, vals, strict=False):
             pdf.cell(w, 4.5, v, border="B", align="L" if w > 20 else "C")
         pdf.ln()
 
@@ -847,14 +1035,24 @@ def _layout_condensed(i: int) -> bytes:
     ttc = round(total_ht + tva_amt, 2)
     pdf.ln(2)
     pdf.set_font("Sans", "", 7)
-    for label, val in [("Total HT", f"{total_ht:.2f} EUR"), (f"TVA {int(tva_rate*100)}%", f"{tva_amt:.2f} EUR"), ("NET A PAYER TTC", f"{ttc:.2f} EUR")]:
+    for label, val in [
+        ("Total HT", f"{total_ht:.2f} EUR"),
+        (f"TVA {int(tva_rate * 100)}%", f"{tva_amt:.2f} EUR"),
+        ("NET A PAYER TTC", f"{ttc:.2f} EUR"),
+    ]:
         bold = label.startswith("NET")
         pdf.set_font("Sans", "B" if bold else "", 7 if not bold else 8)
         pdf.cell(162, 4, label, align="R")
         pdf.cell(18, 4, val, align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
     pdf.set_font("Sans", "", 6)
-    pdf.cell(0, 3.5, f"Reglement : virement IBAN {iban}  BIC {bic}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        3.5,
+        f"Reglement : virement IBAN {iban}  BIC {bic}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
 
     return pdf.output()
 
@@ -873,6 +1071,7 @@ LAYOUTS = [
 
 # ── Trap invoices ──────────────────────────────────────────────────────────────
 # Clean scans but with deliberate data problems to test AI flagging.
+
 
 def _trap_iban_ambiguous(i: int) -> bytes:
     """IBAN avec O/0 ambigus : FR76 3OO0 4028 37O0 0l00 789O 143 (lettres O et l mélangées)."""
@@ -895,7 +1094,9 @@ def _trap_iban_ambiguous(i: int) -> bytes:
     pdf.cell(0, 8, fourn_name, new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "", 9)
     pdf.cell(0, 5, fourn_addr, new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 5, f"Tél : {fourn_tel}   SIRET : {_siret()}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 5, f"Tél : {fourn_tel}   SIRET : {_siret()}", new_x="LMARGIN", new_y="NEXT"
+    )
     pdf.ln(4)
     pdf.set_draw_color(180, 180, 180)
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
@@ -904,7 +1105,13 @@ def _trap_iban_ambiguous(i: int) -> bytes:
     pdf.set_font("Sans", "B", 12)
     pdf.cell(0, 7, f"FACTURE N° {inv_num}", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "", 9)
-    pdf.cell(0, 5, f"Date : {date_str}     Echéance : {echeance_str}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        5,
+        f"Date : {date_str}     Echéance : {echeance_str}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
     pdf.ln(4)
     pdf.set_font("Sans", "B", 9)
     pdf.cell(0, 5, "Facturé à :", new_x="LMARGIN", new_y="NEXT")
@@ -935,7 +1142,10 @@ def _trap_iban_ambiguous(i: int) -> bytes:
     ttc = round(total_ht + tva_amt, 2)
     pdf.ln(3)
     pdf.set_font("Sans", "", 9)
-    for label, val in [("Total HT :", f"{total_ht:.2f} EUR"), ("TVA 20% :", f"{tva_amt:.2f} EUR")]:
+    for label, val in [
+        ("Total HT :", f"{total_ht:.2f} EUR"),
+        ("TVA 20% :", f"{tva_amt:.2f} EUR"),
+    ]:
         pdf.cell(145, 5, label, align="R")
         pdf.cell(25, 5, val, align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "B", 9)
@@ -978,7 +1188,9 @@ def _trap_math_error(i: int) -> bytes:
     pdf.cell(95, 4, f"SIRET : {_siret()}")
     pdf.cell(0, 4, f"Date : {date_str}", align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(95, 4, f"Tél : {fourn_tel}")
-    pdf.cell(0, 4, f"Echéance : {echeance_str}", align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 4, f"Echéance : {echeance_str}", align="R", new_x="LMARGIN", new_y="NEXT"
+    )
     pdf.ln(3)
     pdf.set_draw_color(160, 160, 160)
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
@@ -993,7 +1205,7 @@ def _trap_math_error(i: int) -> bytes:
     headers = ["Réf.", "Désignation", "Qté", "Prix U. HT", "Total HT", "TVA"]
     pdf.set_fill_color(215, 215, 215)
     pdf.set_font("Sans", "B", 8)
-    for w, h in zip(widths, headers):
+    for w, h in zip(widths, headers, strict=False):
         pdf.cell(w, 6, h, border=1, fill=True, align="C")
     pdf.ln()
 
@@ -1002,8 +1214,19 @@ def _trap_math_error(i: int) -> bytes:
     for j, (desc, qty, pu) in enumerate(produits):
         t = round(qty * pu, 2)
         total_ht += t
-        ref = f"ART-{j+1:03d}"
-        for w, val in zip(widths, [ref, desc, str(qty), f"{pu:.2f} EUR", f"{t:.2f} EUR", f"{int(tva_rate*100)}%"]):
+        ref = f"ART-{j + 1:03d}"
+        for w, val in zip(
+            widths,
+            [
+                ref,
+                desc,
+                str(qty),
+                f"{pu:.2f} EUR",
+                f"{t:.2f} EUR",
+                f"{int(tva_rate * 100)}%",
+            ],
+            strict=False,
+        ):
             pdf.cell(w, 5, val, border=1, align="C" if w <= 15 else "L")
         pdf.ln()
 
@@ -1014,10 +1237,12 @@ def _trap_math_error(i: int) -> bytes:
 
     pdf.ln(3)
     pdf.set_font("Sans", "", 8)
-    for label, val in [(f"Base HT {int(tva_rate*100)}%", f"{total_ht:.2f} EUR"),
-                       (f"TVA {int(tva_rate*100)}%", f"{tva_amt:.2f} EUR"),
-                       ("Total HT", f"{total_ht:.2f} EUR"),
-                       ("TOTAL TTC", f"{wrong_ttc:.2f} EUR")]:
+    for label, val in [
+        (f"Base HT {int(tva_rate * 100)}%", f"{total_ht:.2f} EUR"),
+        (f"TVA {int(tva_rate * 100)}%", f"{tva_amt:.2f} EUR"),
+        ("Total HT", f"{total_ht:.2f} EUR"),
+        ("TOTAL TTC", f"{wrong_ttc:.2f} EUR"),
+    ]:
         pdf.cell(150, 4, label, align="R")
         pdf.cell(20, 4, val, align="R", new_x="LMARGIN", new_y="NEXT")
 
@@ -1053,7 +1278,14 @@ def _trap_date_paradox(i: int) -> bytes:
     pdf.cell(0, 9, fourn_name, align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "", 8)
     pdf.cell(0, 4, fourn_addr, align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 4, f"Tél : {fourn_tel}   SIRET : {_siret()}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        4,
+        f"Tél : {fourn_tel}   SIRET : {_siret()}",
+        align="C",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
     pdf.ln(3)
     pdf.set_draw_color(100, 100, 100)
     pdf.set_line_width(0.8)
@@ -1065,7 +1297,14 @@ def _trap_date_paradox(i: int) -> bytes:
     pdf.cell(0, 7, f"FACTURE N° {inv_num}", align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "", 8)
     # Trap: these two dates will appear contradictory
-    pdf.cell(0, 4, f"Date : {date_str}   —   Echéance : {echeance_str}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        4,
+        f"Date : {date_str}   —   Echéance : {echeance_str}",
+        align="C",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
     pdf.ln(6)
 
     pdf.set_font("Sans", "B", 8)
@@ -1100,13 +1339,25 @@ def _trap_date_paradox(i: int) -> bytes:
     ttc = round(total_ht + tva_amt, 2)
     pdf.ln(3)
     pdf.set_font("Sans", "", 8)
-    for label, val in [("Total HT", f"{total_ht:.2f} EUR"), ("TVA 20%", f"{tva_amt:.2f} EUR")]:
+    for label, val in [
+        ("Total HT", f"{total_ht:.2f} EUR"),
+        ("TVA 20%", f"{tva_amt:.2f} EUR"),
+    ]:
         pdf.cell(0, 4, f"{label} : {val}", align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "B", 9)
-    pdf.cell(0, 5, f"TOTAL TTC : {ttc:.2f} EUR", align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 5, f"TOTAL TTC : {ttc:.2f} EUR", align="R", new_x="LMARGIN", new_y="NEXT"
+    )
     pdf.ln(6)
     pdf.set_font("Sans", "", 7)
-    pdf.cell(0, 4, f"Règlement par virement — IBAN : {iban}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        4,
+        f"Règlement par virement — IBAN : {iban}",
+        align="C",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
 
     return pdf.output()
 
@@ -1119,7 +1370,7 @@ def _trap_tva_mismatch(i: int) -> bytes:
     pdf.set_margins(20, 20, 20)
     pdf.set_auto_page_break(False)
 
-    fourn_name, fourn_addr, fourn_tel = random.choice(FOURNISSEURS)
+    fourn_name, fourn_addr, _fourn_tel = random.choice(FOURNISSEURS)
     client_name, client_addr = random.choice(CLIENTS)
     inv_num = _invoice_number(i)
     date_str, echeance_str = _random_date()
@@ -1177,7 +1428,7 @@ def _trap_tva_mismatch(i: int) -> bytes:
     pdf.cell(145, 5, "Sous-total HT", align="R")
     pdf.cell(25, 5, f"{total_ht:.2f} EUR", align="R", new_x="LMARGIN", new_y="NEXT")
     # Label says 20%, amount is 10% of HT
-    pdf.cell(145, 5, f"TVA {int(tva_label_rate*100)}%", align="R")
+    pdf.cell(145, 5, f"TVA {int(tva_label_rate * 100)}%", align="R")
     pdf.cell(25, 5, f"{tva_amt:.2f} EUR", align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Sans", "B", 10)
     pdf.cell(145, 6, "TOTAL TTC", align="R")
@@ -1217,7 +1468,9 @@ def _trap_missing_fields(i: int) -> bytes:
     pdf.set_x(18)
     pdf.cell(0, 4, fourn_addr, new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(18)
-    pdf.cell(0, 4, f"Tél : {fourn_tel}  —  SIRET : {_siret()}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 4, f"Tél : {fourn_tel}  —  SIRET : {_siret()}", new_x="LMARGIN", new_y="NEXT"
+    )
     pdf.ln(3)
 
     pdf.set_line_width(0.6)
@@ -1237,14 +1490,20 @@ def _trap_missing_fields(i: int) -> bytes:
 
     pdf.set_x(18)
     pdf.set_font("Sans", "B", 8)
-    pdf.cell(0, 5, f"CLIENT : {client_name}  /  {client_addr}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0, 5, f"CLIENT : {client_name}  /  {client_addr}", new_x="LMARGIN", new_y="NEXT"
+    )
     pdf.line(18, pdf.get_y(), 192, pdf.get_y())
     pdf.ln(4)
 
     total_ht = 0
     pdf.set_x(18)
     pdf.set_font("Sans", "B", 8)
-    for w, h in zip([85, 20, 30, 30, 9], ["DESIGNATION", "QTE", "PU HT", "MONTANT HT", "TVA"]):
+    for w, h in zip(
+        [85, 20, 30, 30, 9],
+        ["DESIGNATION", "QTE", "PU HT", "MONTANT HT", "TVA"],
+        strict=False,
+    ):
         pdf.cell(w, 6, h, border=1, align="C")
     pdf.ln()
     pdf.set_font("Sans", "", 8)
@@ -1252,7 +1511,11 @@ def _trap_missing_fields(i: int) -> bytes:
         t = round(qty * pu, 2)
         total_ht += t
         pdf.set_x(18)
-        for w, v in zip([85, 20, 30, 30, 9], [desc, str(qty), f"{pu:.2f}", f"{t:.2f}", f"{int(tva_rate*100)}%"]):
+        for w, v in zip(
+            [85, 20, 30, 30, 9],
+            [desc, str(qty), f"{pu:.2f}", f"{t:.2f}", f"{int(tva_rate * 100)}%"],
+            strict=False,
+        ):
             pdf.cell(w, 5, v, border=1, align="C" if w <= 30 else "L")
         pdf.ln()
 
@@ -1262,7 +1525,7 @@ def _trap_missing_fields(i: int) -> bytes:
     pdf.set_x(18)
     pdf.set_font("Sans", "", 8)
     # Trap: no HT subtotal line, jump straight to TTC
-    pdf.cell(155, 4, f"T.V.A. {int(tva_rate*100)}%", align="R")
+    pdf.cell(155, 4, f"T.V.A. {int(tva_rate * 100)}%", align="R")
     pdf.cell(19, 4, f"{tva_amt:.2f}", align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(18)
     pdf.set_font("Sans", "B", 9)
@@ -1272,7 +1535,13 @@ def _trap_missing_fields(i: int) -> bytes:
     pdf.set_x(18)
     pdf.set_font("Sans", "", 7)
     # Trap: no IBAN, just "à communiquer"
-    pdf.cell(0, 4, "Coordonnées bancaires : à communiquer sur demande", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        4,
+        "Coordonnées bancaires : à communiquer sur demande",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
 
     return pdf.output()
 
@@ -1286,19 +1555,19 @@ TRAP_LAYOUTS = [
 ]
 
 
-def generate():
+def generate() -> None:
     """Génère un exemplaire de chaque layout pour chaque qualité + factures pièges."""
-    from pdf2image import convert_from_bytes
-
     qualities = ["good", "bad", "ugly"]
     total = len(LAYOUTS) * len(qualities)
-    print(f"Generating {total} invoices ({len(LAYOUTS)} layouts x {len(qualities)} qualities)\n")
+    print(
+        f"Generating {total} invoices ({len(LAYOUTS)} layouts x {len(qualities)} qualities)\n"
+    )
 
     counter = 1
     for q in qualities:
         out_dir = QUALITY_DIRS[q]
         for layout in LAYOUTS:
-            layout_name = layout.__name__.replace('_layout_', '')
+            layout_name = layout.__name__.replace("_layout_", "")
             filename = f"{q}-{layout_name}.pdf"
             pdf_bytes = bytes(layout(counter))
             pages = convert_from_bytes(pdf_bytes, dpi=150)
@@ -1312,7 +1581,7 @@ def generate():
     print(f"\nGenerating {len(TRAP_LAYOUTS)} trap invoices (clean scan, bad data)\n")
     trap_dir = QUALITY_DIRS["good"]
     for layout in TRAP_LAYOUTS:
-        trap_name = layout.__name__.replace('_trap_', '')
+        trap_name = layout.__name__.replace("_trap_", "")
         filename = f"trap-{trap_name}.pdf"
         pdf_bytes = bytes(layout(counter))
         pages = convert_from_bytes(pdf_bytes, dpi=150)
@@ -1323,7 +1592,7 @@ def generate():
         counter += 1
 
     print(f"\nDone. {total} normal + {len(TRAP_LAYOUTS)} trap invoices.")
-    print(f"Trap invoices in: data/unprocessed/clean/ (prefix 'trap-')")
+    print("Trap invoices in: data/unprocessed/clean/ (prefix 'trap-')")
 
 
 if __name__ == "__main__":
