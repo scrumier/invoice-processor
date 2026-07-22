@@ -1,11 +1,9 @@
 import csv
-import os
-import pytest
+
+from processor.exporter import append_to_csv
 
 
 def test_append_creates_file_with_header(tmp_path):
-    from processor.exporter import append_to_csv
-
     csv_path = str(tmp_path / "invoices.csv")
     row = {
         "filename": "test.pdf",
@@ -30,14 +28,18 @@ def test_append_creates_file_with_header(tmp_path):
 
 
 def test_append_adds_row_without_duplicating_header(tmp_path):
-    from processor.exporter import append_to_csv
-
     csv_path = str(tmp_path / "invoices.csv")
     row = {
-        "filename": "a.pdf", "processed_at": "2026-05-13T10:00:00",
-        "numero_facture": "F-001", "date_facture": "2026-01-15",
-        "fournisseur": "A", "montant_ht": "100", "tva": "20",
-        "montant_ttc": "120", "iban": None, "echeance": None,
+        "filename": "a.pdf",
+        "processed_at": "2026-05-13T10:00:00",
+        "numero_facture": "F-001",
+        "date_facture": "2026-01-15",
+        "fournisseur": "A",
+        "montant_ht": "100",
+        "tva": "20",
+        "montant_ttc": "120",
+        "iban": None,
+        "echeance": None,
     }
     append_to_csv(row, csv_path)
     row["filename"] = "b.pdf"

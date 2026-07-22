@@ -1,23 +1,24 @@
-import pytest
 from pathlib import Path
+
+import pytest
+from pdf2image.exceptions import PDFPageCountError
 from PIL import Image
 
+from processor.loader import pdf_to_images
 
-def test_load_pdf_returns_images(tmp_path):
-    from processor.loader import pdf_to_images
+SAMPLE = Path("tests/fixtures/sample_invoice.pdf")
 
-    sample = Path("tests/fixtures/sample_invoice.pdf")
-    if not sample.exists():
+
+def test_load_pdf_returns_images():
+    if not SAMPLE.exists():
         pytest.skip("No sample PDF fixture")
 
-    images = pdf_to_images(str(sample))
-    assert isinstance(images, list)
+    images = pdf_to_images(str(SAMPLE))
+
     assert len(images) >= 1
-    assert all(isinstance(img, Image.Image) for img in images)
+    assert all(isinstance(image, Image.Image) for image in images)
 
 
 def test_load_invalid_path_raises():
-    from processor.loader import pdf_to_images
-
-    with pytest.raises(Exception):
+    with pytest.raises(PDFPageCountError):
         pdf_to_images("/nonexistent/file.pdf")
