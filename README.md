@@ -10,15 +10,22 @@ Number, date, supplier, amounts, VAT, IBAN, due date.
 ```bash
 sudo apt-get install -y poppler-utils
 cp .env.example .env    # add your OPENROUTER_API_KEY
-uv sync
-uv run python watch.py  # watches data/invoices/
+make setup
+make demo               # fake invoices to try it with
+make watch              # watches data/invoices/
 ```
 
-Drop a PDF into `data/invoices/` and a line appears in `data/output/invoices.csv`. `uv run python viewer.py` shows that CSV as a table on http://127.0.0.1:5052. No invoices to test with? `generate_sample_invoices.py` makes some.
+Drop a PDF into `data/invoices/` and a line appears in `data/output/invoices.csv`. `make run` shows that CSV as a live table on http://127.0.0.1:5052.
+
+`make test` runs the suite, `make lint` runs Ruff.
 
 ## How it works
 
 Each page is converted to an image and read by a vision model (Gemini via OpenRouter), the way a person reads it. No templates, no zone mapping per supplier, so an unfamiliar layout doesn't break the pipeline.
+
+What comes back is validated against a schema before anything else touches it, so a malformed response fails immediately instead of quietly writing a half-empty row.
+
+Then plain arithmetic, no model involved, flags what doesn't add up: a line total that isn't quantity times unit price, lines that don't sum to the stated total, HT plus VAT that misses the total charged, a VAT rate that no French rate explains, a malformed IBAN, a due date before the invoice date. Every flag can be explained to an accountant without appealing to what a model thought.
 
 ## What it won't do
 
